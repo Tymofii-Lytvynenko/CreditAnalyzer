@@ -136,7 +136,7 @@ st.sidebar.caption("Додаткові платежі *поверх* розра�
 monthly_extra_pay = st.sidebar.number_input("Регулярна доплата (грн/міс)", min_value=0, value=0, step=500)
 
 st.sidebar.subheader("Разові погашення")
-irregular_data = pd.DataFrame([{"Місяць №": 12, "Сума (грн)": 10000}])
+irregular_data = pd.DataFrame([{"Місяць №": 12, "Сума (грн)": 0}])
 edited_df = st.sidebar.data_editor(irregular_data, num_rows="dynamic", hide_index=True)
 
 irregular_payments_dict = {}
