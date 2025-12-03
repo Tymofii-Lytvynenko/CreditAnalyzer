@@ -91,7 +91,7 @@ def calculate_schedule(principal, annual_rate, start_date,
             "Платіж": total_payment,
             "Тіло": principal_payment,
             "Відсотки": interest_payment,
-            "Extra": extra_paid_in_record,
+            "Дострокові погашення": extra_paid_in_record,
             "Залишок": remaining_balance
         })
         
@@ -248,12 +248,12 @@ if valid_input:
 
         with tab3:
             # Спрощена таблиця для мобільного
-            mobile_df = df_real[["Дата", "Платіж", "Тіло", "Відсотки", "Extra", "Залишок"]].copy()
+            mobile_df = df_real[["Дата", "Платіж", "Тіло", "Відсотки", "Дострокові погашення", "Залишок"]].copy()
             # Форматування дати
             mobile_df["Дата"] = mobile_df["Дата"].apply(lambda x: x.strftime("%d.%m.%y"))
             
             st.dataframe(
-                mobile_df.style.format("{:.0f}", subset=["Платіж", "Тіло", "Відсотки", "Extra", "Залишок"]), 
+                mobile_df.style.format("{:.0f}", subset=["Платіж", "Тіло", "Відсотки", "Дострокові погашення", "Залишок"]), 
                 use_container_width=True,
                 height=450,
                 hide_index=True
