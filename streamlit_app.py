@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
@@ -9,20 +8,31 @@ from dateutil.relativedelta import relativedelta
 st.set_page_config(
     page_title="Кредитний Калькулятор",
     page_icon="💸",
-    layout="wide"
+    layout="centered",  # "centered" краще виглядає на мобільних телефонах, ніж "wide"
+    initial_sidebar_state="collapsed"
 )
 
-# --- Логіка розрахунку ---
+# --- CSS для мобільної оптимізації ---
+# Зменшуємо відступи, щоб контент краще влазив на екран
+st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        [data-testid="stMetricValue"] {
+            font-size: 1.2rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Логіка розрахунку (Без змін, вона правильна) ---
 @st.cache_data
 def calculate_schedule(principal, annual_rate, start_date, 
                        years=None, fixed_payment=None, 
                        monthly_extra=0, irregular_payments=None):
-    """
-    Універсальна функція розрахунку.
-    Може працювати у двох режимах:
-    1. Фіксований термін (years вказано, fixed_payment=None) -> рахуємо аннуїтет.
-    2. Фіксований платіж (years=None, fixed_payment вказано) -> рахуємо термін.
-    """
     if irregular_payments is None:
         irregular_payments = {}
 
@@ -31,23 +41,18 @@ def calculate_schedule(principal, annual_rate, start_date,
     remaining_balance = principal
     current_date = start_date
     
-    # Визначаємо базовий щомісячний платіж
     if fixed_payment is not None:
-        # Режим: "За сумою платежу"
         base_payment = fixed_payment
-        # Перевірка, чи платіж перекриває хоча б відсотки
         first_month_interest = principal * monthly_rate
         if base_payment <= first_month_interest:
-            return pd.DataFrame() # Повертаємо порожній DF як помилку
+            return pd.DataFrame()
     else:
-        # Режим: "За терміном"
         total_months_planned = years * 12
         if monthly_rate > 0:
             base_payment = principal * (monthly_rate * (1 + monthly_rate)**total_months_planned) / ((1 + monthly_rate)**total_months_planned - 1)
         else:
             base_payment = principal / total_months_planned
 
-    # Ліміт ітерацій (наприклад, 50 років), щоб уникнути нескінченного циклу при малих платежах
     max_months = 600 
     
     for i in range(1, max_months + 1):
@@ -55,200 +60,171 @@ def calculate_schedule(principal, annual_rate, start_date,
             break
 
         interest_payment = remaining_balance * monthly_rate
-        
-        # Основна логіка платежу
-        # Базова частина (тіло + відсотки)
         current_base_payment = base_payment
         
-        # Додаткові платежі
         extra = monthly_extra
         if i in irregular_payments:
             extra += irregular_payments[i]
             
-        # Загальна сума спроби платежу
         total_payment_attempt = current_base_payment + extra
         
-        # Якщо залишок менший за платіж -> коригуємо (фінальний місяць)
         if total_payment_attempt >= remaining_balance + interest_payment:
             total_payment = remaining_balance + interest_payment
             principal_payment = remaining_balance
             remaining_balance = 0
-            # Реальна "доплата" - це все, що понад нараховані відсотки
-            # Але для коректності статистики "Extra" вважаємо те, що більше Base
-            # В останньому місяці це складно розділити, тому спростимо:
             extra_paid_in_record = max(0, total_payment - (interest_payment + (base_payment - interest_payment)))
         else:
             total_payment = total_payment_attempt
-            # Спочатку гасимо відсотки
             principal_payment = total_payment - interest_payment
             remaining_balance -= principal_payment
-            extra_paid_in_record = extra # Записуємо чистий екстра платіж
+            extra_paid_in_record = extra
 
         schedule.append({
-            "Номер місяця": i,
+            "Місяць": i,
             "Дата": current_date,
-            "Загальний платіж": total_payment,
-            "Тіло кредиту": principal_payment,
+            "Платіж": total_payment,
+            "Тіло": principal_payment,
             "Відсотки": interest_payment,
-            "Додатково погашено": extra_paid_in_record, # Для відображення
-            "Залишок боргу": remaining_balance
+            "Extra": extra_paid_in_record,
+            "Залишок": remaining_balance
         })
         
         current_date += relativedelta(months=1)
 
     return pd.DataFrame(schedule)
 
-# --- Sidebar ---
-st.sidebar.header("⚙️ Параметри кредиту")
+# --- Інтерфейс ---
+st.title("💸 Кредитний Калькулятор")
 
-# 1. Загальні ввідні
-loan_amount = st.sidebar.number_input("Сума кредиту (грн)", min_value=1000, value=500000, step=1000)
-interest_rate = st.sidebar.number_input("Річна ставка (%)", min_value=0.1, value=15.0, step=0.1)
-start_date = st.sidebar.date_input("Дата початку", value=date.today())
+# 1. Основні налаштування (Вгорі, в Expander для мобільних)
+with st.expander("⚙️ Налаштування кредиту", expanded=True):
+    col_in1, col_in2 = st.columns(2)
+    with col_in1:
+        loan_amount = st.number_input("Сума (грн)", min_value=1000, value=500000, step=10000)
+    with col_in2:
+        interest_rate = st.number_input("Ставка (%)", min_value=0.1, value=15.0, step=0.5)
+    
+    start_date = st.date_input("Дата початку", value=date.today())
+    
+    calc_mode = st.radio("Розрахунок за:", ("Терміном", "Платежем"), horizontal=True)
 
-st.sidebar.markdown("---")
+    target_years = None
+    target_payment = None
 
-# 2. Вибір режиму
-calc_mode = st.sidebar.radio(
-    "Спосіб розрахунку:",
-    ("За терміном (років)", "За сумою платежу")
-)
+    if calc_mode == "Терміном":
+        target_years = st.slider("Років:", 1, 30, 5)
+    else:
+        min_payment = (loan_amount * (interest_rate / 100 / 12)) + 1
+        target_payment = st.number_input(
+            f"Платіж (мін. {int(min_payment)} грн)", 
+            min_value=float(int(min_payment)), 
+            value=float(int(min_payment * 1.5)), 
+            step=500.0
+        )
+    
+    st.caption("👇 Для дод. погашень відкрийте бокове меню (зліва зверху).")
 
-target_years = None
-target_payment = None
-
-if calc_mode == "За терміном (років)":
-    target_years = st.sidebar.slider("Бажаний термін (років)", 1, 30, 5)
-else:
-    # Підказка мінімального платежу
-    min_payment = (loan_amount * (interest_rate / 100 / 12)) + 1
-    target_payment = st.sidebar.number_input(
-        f"Фіксований платіж (мін. {min_payment:.2f} грн)", 
-        min_value=float(int(min_payment)), 
-        value=float(int(min_payment * 1.5)), 
-        step=500.0
-    )
-
-st.sidebar.markdown("---")
+# 2. Sidebar (Тільки для просунутих налаштувань)
 st.sidebar.header("🚀 Дострокове погашення")
-st.sidebar.caption("Додаткові платежі *поверх* розрахованого вище графіку.")
-
-monthly_extra_pay = st.sidebar.number_input("Регулярна доплата (грн/міс)", min_value=0, value=0, step=500)
+monthly_extra_pay = st.sidebar.number_input("Щомісячна доплата (+грн)", min_value=0, value=0, step=500)
 
 st.sidebar.subheader("Разові погашення")
-irregular_data = pd.DataFrame([{"Місяць №": 12, "Сума (грн)": 0}])
+irregular_data = pd.DataFrame([{"Місяць": 12, "Сума": 0}])
 edited_df = st.sidebar.data_editor(irregular_data, num_rows="dynamic", hide_index=True)
 
 irregular_payments_dict = {}
 if not edited_df.empty:
     for _, row in edited_df.iterrows():
         try:
-            m = int(row["Місяць №"])
-            val = float(row["Сума (грн)"])
+            m = int(row["Місяць"])
+            val = float(row["Сума"])
             if m > 0 and val > 0:
                 irregular_payments_dict[m] = irregular_payments_dict.get(m, 0) + val
         except:
             pass
 
-# --- Основна частина ---
-st.title("📊 Кредитний Аналізатор")
-
-# Перевірка коректності введення для режиму "За сумою"
+# --- Розрахунки ---
 valid_input = True
 if target_payment is not None:
     monthly_rate_check = interest_rate / 12 / 100
     if target_payment <= loan_amount * monthly_rate_check:
-        st.error(f"⚠️ Ваш платіж ({target_payment} грн) менший за щомісячні відсотки! Борг ніколи не буде виплачений. Збільшіть суму платежу.")
+        st.error(f"⚠️ Платіж замалий! Мінімальний: {int(loan_amount * monthly_rate_check) + 1} грн")
         valid_input = False
 
 if valid_input:
-    # 1. Базовий сценарій (без переплат, чистий графік)
-    df_base = calculate_schedule(
-        principal=loan_amount, 
-        annual_rate=interest_rate, 
-        start_date=start_date, 
-        years=target_years, 
-        fixed_payment=target_payment,
-        monthly_extra=0, 
-        irregular_payments={}
-    )
-
-    # 2. Реальний сценарій (з переплатами)
+    # Базовий розрахунок
+    df_base = calculate_schedule(loan_amount, interest_rate, start_date, years=target_years, fixed_payment=target_payment)
+    # Реальний розрахунок
     df_real = calculate_schedule(
-        principal=loan_amount, 
-        annual_rate=interest_rate, 
-        start_date=start_date, 
-        years=target_years, 
-        fixed_payment=target_payment,
-        monthly_extra=monthly_extra_pay, 
-        irregular_payments=irregular_payments_dict
+        loan_amount, interest_rate, start_date, 
+        years=target_years, fixed_payment=target_payment,
+        monthly_extra=monthly_extra_pay, irregular_payments=irregular_payments_dict
     )
 
-    if df_base.empty or df_real.empty:
-        st.error("Помилка розрахунку. Перевірте вхідні дані.")
+    if df_real.empty:
+        st.error("Помилка розрахунку.")
     else:
         # --- Метрики ---
-        total_int_base = df_base["Відсотки"].sum()
         total_int_real = df_real["Відсотки"].sum()
+        total_int_base = df_base["Відсотки"].sum()
         saved_money = total_int_base - total_int_real
-
-        months_base = len(df_base)
-        months_real = len(df_real)
-        saved_months = months_base - months_real
+        saved_months = len(df_base) - len(df_real)
         
-        # Обчислення років та місяців для відображення
-        def format_duration(m):
-            y = m // 12
-            rem_m = m % 12
-            if y > 0: return f"{y} р. {rem_m} міс."
-            return f"{m} міс."
+        # Функція форматування років
+        def fmt_yrs(m):
+            y, rem = divmod(m, 12)
+            return f"{y}р {rem}м" if y > 0 else f"{m} міс"
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Загальні відсотки", f"{total_int_real:,.0f} грн", delta=f"-{saved_money:,.0f} грн", delta_color="inverse")
-        col2.metric("Тривалість", format_duration(months_real), delta=f"-{saved_months} міс.", delta_color="inverse")
-        
-        first_pay = df_base.iloc[0]['Загальний платіж']
-        col3.metric("Базовий платіж", f"{first_pay:,.2f} грн", help="Обов'язковий платіж без урахування додаткових погашень")
+        # Компактні метрики
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Відсотки", f"{int(total_int_real/1000)}k", delta=f"-{int(saved_money)} грн", delta_color="inverse")
+        c2.metric("Термін", fmt_yrs(len(df_real)), delta=f"-{saved_months} міс", delta_color="inverse")
+        first_pay = df_base.iloc[0]['Платіж']
+        c3.metric("База", f"{int(first_pay)}")
+        st.divider()
 
-        # --- Графіки ---
-        tab1, tab2, tab3 = st.tabs(["📉 Динаміка", "🍰 Аналіз", "📋 Таблиця"])
+        # --- Графіки (Оптимізовано для мобільних) ---
+        tab1, tab2 = st.tabs(["📉 Графік", "📋 Таблиця"])
 
         with tab1:
-            st.subheader("Порівняння швидкості погашення")
+            # Графік 1: Залишок
             df_chart = pd.concat([
-                df_base[['Номер місяця', 'Залишок боргу']].assign(Сценарій="Базовий (без доплат)"),
-                df_real[['Номер місяця', 'Залишок боргу']].assign(Сценарій="З достроковим погашенням")
+                df_base[['Місяць', 'Залишок']].assign(Тип="План"),
+                df_real[['Місяць', 'Залишок']].assign(Тип="Факт")
             ])
-            fig = px.line(df_chart, x="Номер місяця", y="Залишок боргу", color="Сценарій",
-                          color_discrete_map={"Базовий (без доплат)": "#EF553B", "З достроковим погашенням": "#00CC96"})
+            fig = px.line(df_chart, x="Місяць", y="Залишок", color="Тип",
+                          color_discrete_map={"План": "#EF553B", "Факт": "#00CC96"})
+            
+            # Легенда зверху для економії місця
+            fig.update_layout(
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(l=10, r=10, t=30, b=10),
+                height=300
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-        with tab2:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Структура витрат**")
-                fig_pie = px.pie(names=['Тіло кредиту', 'Сплачені відсотки'], 
-                                 values=[loan_amount, total_int_real], 
-                                 hole=0.4, color_discrete_sequence=['#636EFA', '#EF553B'])
-                st.plotly_chart(fig_pie, use_container_width=True)
-            with c2:
-                st.markdown("**Склад платежів у часі**")
-                fig_bar = px.bar(df_real, x="Номер місяця", y=["Відсотки", "Тіло кредиту", "Додатково погашено"],
-                                 labels={"value": "Сума (грн)"},
-                                 color_discrete_map={"Відсотки": "#EF553B", "Тіло кредиту": "#636EFA", "Додатково погашено": "#00CC96"})
-                st.plotly_chart(fig_bar, use_container_width=True)
+            # Графік 2: Структура (Pie)
+            st.caption("Структура виплат:")
+            fig_pie = px.pie(names=['Тіло', 'Відсотки'], values=[loan_amount, total_int_real], 
+                             hole=0.5, color_discrete_sequence=['#636EFA', '#EF553B'])
+            fig_pie.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=250, showlegend=False)
+            # Додаємо текст в центр
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-        with tab3:
+        with tab2:
+            # Спрощена таблиця для мобільного
+            mobile_df = df_real[["Дата", "Платіж", "Тіло", "Відсотки", "Залишок"]].copy()
+            # Форматування дати
+            mobile_df["Дата"] = mobile_df["Дата"].apply(lambda x: x.strftime("%d.%m.%y"))
+            
             st.dataframe(
-                df_real.style.format({
-                    "Загальний платіж": "{:,.2f}", 
-                    "Тіло кредиту": "{:,.2f}",
-                    "Відсотки": "{:,.2f}",
-                    "Додатково погашено": "{:,.2f}",
-                    "Залишок боргу": "{:,.2f}"
-                }), 
-                use_container_width=True
+                mobile_df.style.format("{:.0f}", subset=["Платіж", "Тіло", "Відсотки", "Залишок"]), 
+                use_container_width=True,
+                height=400
             )
             
+            # Завантаження повної версії
             csv = df_real.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Завантажити CSV", data=csv, file_name="credit_schedule.csv", mime="text/csv")
+            st.download_button("📥 Завантажити повний CSV", data=csv, file_name="credit.csv", mime="text/csv")
