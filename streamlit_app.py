@@ -236,7 +236,7 @@ if valid_input:
             # Другий графік з оригіналу
             fig_bar = px.bar(df_real, x="Місяць", y=["Відсотки", "Тіло", "Дострокові погашення"],
                              labels={"value": "Сума (грн)", "Місяць": "№ Місяця"},
-                             color_discrete_map={"Відсотки": "#EF553B", "Тіло": "#636EFA", "Extra": "#00CC96"})
+                             color_discrete_map={"Відсотки": "#EF553B", "Тіло": "#636EFA", "Дострокові погашення": "#00CC96"})
             # Легенда зверху
             fig_bar.update_layout(
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, title=None),
